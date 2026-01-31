@@ -1,497 +1,291 @@
-import { useEffect, useMemo, useState } from 'react';
-import {
-  Bell,
-  AlertTriangle,
-  CheckCircle,
-  Loader2,
-  MapPin,
-  Clock,
-  Plus,
-  Search,
-  Trash2,
-  ShieldCheck,
-  Video,
-  User,
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Campus Tracker | Live Surveillance</title>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #262626; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #404040; }
+        @keyframes pulse-soft {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-soft { animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    </style>
+</head>
+<body class="bg-neutral-950 text-gray-100">
+    <div id="root"></div>
 
-// Types
-type DetectionStatus = 'Bunking' | 'Authorized' | 'In Class';
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
 
-type Detection = {
-  id: string;
-  name: string;
-  status: DetectionStatus;
-  x: number; // percent left
-  y: number; // percent top
-  w: number; // percent width
-  h: number; // percent height
-  location: string;
-};
+        // Custom Icon Component to handle Lucide in CDN
+        const Icon = ({ name, className = "h-4 w-4" }) => {
+            const iconRef = useRef(null);
+            useEffect(() => {
+                if (iconRef.current) {
+                    const icon = lucide.icons[name];
+                    if (icon) {
+                        const svg = lucide.createIcons({
+                            icons: { [name]: icon },
+                            nameAttr: 'data-lucide',
+                            attrs: { class: className }
+                        });
+                    }
+                }
+            }, [name, className]);
+            return <i ref={iconRef} data-lucide={name} className={className}></i>;
+        };
 
-type Exemption = {
-  id: string;
-  name: string;
-  reason: string;
-};
+        const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+        const now = () => new Date().toLocaleTimeString();
+        const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
-type AlertItem = {
-  id: string;
-  studentName: string;
-  location: string;
-  timestamp: string;
-  messageSent: boolean;
-};
+        const sampleStudents = ['John Doe', 'Jane Smith', 'Alex Lee', 'Priya Patel', 'Wei Chen', 'Carlos Ramirez', 'Aisha Khan', 'Emily Clark', 'Michael Brown', 'Sara Johnson'];
+        const sampleReasons = ['Sports Competition', 'Medical', 'Library Duty', 'Lab Prep', 'Placement Event'];
+        const sampleLocations = ['Cafeteria', 'Library', 'Quad', 'Gym', 'Parking Lot', 'Corridor', 'Garden'];
+        const inClassLocations = ['Room 101', 'Room 202', 'CS Lab', 'Lecture Hall A'];
 
-// Utils
-const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
-const now = () => new Date().toLocaleString();
-const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+        function randomBox() {
+            const w = 15 + Math.random() * 15;
+            const h = 20 + Math.random() * 20;
+            const x = Math.random() * (100 - w - 4) + 2;
+            const y = Math.random() * (100 - h - 4) + 2;
+            return { x, y, w, h };
+        }
 
-const sampleStudents = [
-  'John Doe',
-  'Jane Smith',
-  'Alex Lee',
-  'Priya Patel',
-  'Wei Chen',
-  'Carlos Ramirez',
-  'Aisha Khan',
-  'Emily Clark',
-  'Michael Brown',
-  'Sara Johnson',
-];
+        function statusStyles(status) {
+            switch (status) {
+                case 'Bunking': return { border: 'border-red-500/90', bg: 'bg-red-500/10', text: 'text-red-300' };
+                case 'Authorized': return { border: 'border-green-500/90', bg: 'bg-green-500/10', text: 'text-green-300' };
+                case 'In Class': return { border: 'border-blue-500/90', bg: 'bg-blue-500/10', text: 'text-blue-300' };
+                default: return { border: 'border-gray-500', bg: 'bg-gray-500/10', text: 'text-gray-300' };
+            }
+        }
 
-const sampleReasons = ['Sports Competition', 'Medical', 'Library Duty', 'Lab Prep', 'Placement Event'];
-const sampleLocations = ['Cafeteria', 'Library', 'Quad', 'Gym', 'Parking Lot', 'Corridor', 'Garden'];
-const inClassLocations = ['Room 101', 'Room 202', 'CS Lab', 'Lecture Hall A'];
+        function App() {
+            const [detections, setDetections] = useState([]);
+            const [alerts, setAlerts] = useState([]);
+            const [exemptions, setExemptions] = useState([
+                { id: '1', name: 'Jane Smith', reason: 'Medical' },
+                { id: '2', name: 'Alex Lee', reason: 'Sports Competition' }
+            ]);
+            const [search, setSearch] = useState('');
+            const [newExName, setNewExName] = useState('');
+            const [newExReason, setNewExReason] = useState('');
+            const [isWebcamActive, setIsWebcamActive] = useState(false);
+            const videoRef = useRef(null);
 
-function randomBox() {
-  // Keep boxes within 10%-60% width/height and inside frame
-  const w = 12 + Math.random() * 18; // 12% - 30%
-  const h = 14 + Math.random() * 20; // 14% - 34%
-  const x = Math.random() * (100 - w - 4) + 2; // padding 2%
-  const y = Math.random() * (100 - h - 4) + 2;
-  return { x, y, w, h };
-}
+            const filteredExemptions = useMemo(() => 
+                exemptions.filter(e => e.name.toLowerCase().includes(search.toLowerCase()) || e.reason.toLowerCase().includes(search.toLowerCase())),
+                [exemptions, search]
+            );
 
-function statusStyles(status: DetectionStatus) {
-  switch (status) {
-    case 'Bunking':
-      return {
-        border: 'border-red-500/90',
-        bg: 'bg-red-500/10',
-        text: 'text-red-300',
-        chip: 'bg-red-500/20 text-red-300 border border-red-500/40',
-      };
-    case 'Authorized':
-      return {
-        border: 'border-green-500/90',
-        bg: 'bg-green-500/10',
-        text: 'text-green-300',
-        chip: 'bg-green-500/20 text-green-300 border border-green-500/40',
-      };
-    case 'In Class':
-      return {
-        border: 'border-blue-500/90',
-        bg: 'bg-blue-500/10',
-        text: 'text-blue-300',
-        chip: 'bg-blue-500/20 text-blue-300 border border-blue-500/40',
-      };
-    default:
-      return { border: 'border-gray-500', bg: 'bg-gray-500/10', text: 'text-gray-300', chip: 'bg-gray-500/20' };
-  }
-}
+            const [classes, setClasses] = useState([
+                { name: 'CS101', expected: 60, current: 54 },
+                { name: 'EE207', expected: 45, current: 42 },
+                { name: 'MA110', expected: 50, current: 48 },
+                { name: 'BIO150', expected: 40, current: 36 }
+            ]);
 
-export default function Home() {
-  const [detections, setDetections] = useState<Detection[]>([]);
-  const [alerts, setAlerts] = useState<AlertItem[]>([]);
-  const [exemptions, setExemptions] = useState<Exemption[]>([
-    { id: uid(), name: 'Jane Smith', reason: 'Medical' },
-    { id: uid(), name: 'Alex Lee', reason: 'Sports Competition' },
-  ]);
+            useEffect(() => {
+                if (isWebcamActive && videoRef.current) {
+                    navigator.mediaDevices.getUserMedia({ video: true })
+                        .then(stream => { if (videoRef.current) videoRef.current.srcObject = stream; })
+                        .catch(err => { console.error(err); setIsWebcamActive(false); });
+                } else if (!isWebcamActive && videoRef.current && videoRef.current.srcObject) {
+                    const stream = videoRef.current.srcObject;
+                    stream.getTracks().forEach(track => track.stop());
+                    videoRef.current.srcObject = null;
+                }
+            }, [isWebcamActive]);
 
-  const [search, setSearch] = useState('');
-  const [newExName, setNewExName] = useState('');
-  const [newExReason, setNewExReason] = useState('');
+            const simulateDetection = () => {
+                const name = sampleStudents[Math.floor(Math.random() * sampleStudents.length)];
+                const box = randomBox();
+                const r = Math.random();
+                let status, location;
 
-  const filteredExemptions = useMemo(
-    () =>
-      exemptions.filter(
-        (e) => e.name.toLowerCase().includes(search.toLowerCase()) || e.reason.toLowerCase().includes(search.toLowerCase())
-      ),
-    [exemptions, search]
-  );
+                if (r < 0.45) {
+                    status = 'Bunking';
+                    location = sampleLocations[Math.floor(Math.random() * sampleLocations.length)];
+                    if (exemptions.some(e => e.name.toLowerCase() === name.toLowerCase())) {
+                        status = 'Authorized';
+                    } else {
+                        const id = uid();
+                        setAlerts(prev => [{ id, studentName: name, location, timestamp: now(), messageSent: false }, ...prev].slice(0, 20));
+                        setTimeout(() => setAlerts(prev => prev.map(a => a.id === id ? { ...a, messageSent: true } : a)), 1500);
+                    }
+                } else if (r < 0.80) {
+                    status = 'Authorized';
+                    location = sampleLocations[Math.floor(Math.random() * sampleLocations.length)];
+                } else {
+                    status = 'In Class';
+                    location = inClassLocations[Math.floor(Math.random() * inClassLocations.length)];
+                }
 
-  const [classes, setClasses] = useState(
-    [
-      { name: 'CS101', expected: 60, current: 54 },
-      { name: 'EE207', expected: 45, current: 42 },
-      { name: 'MA110', expected: 50, current: 48 },
-      { name: 'BIO150', expected: 40, current: 36 },
-    ].map((c) => ({ ...c }))
-  );
+                setDetections(prev => [{ id: uid(), name, status, ...box, location }, ...prev].slice(0, 6));
+            };
 
-  const adjustAttendance = (delta: number) => {
-    setClasses((prev) =>
-      prev.map((c, idx) => {
-        if (idx !== Math.floor(Math.random() * prev.length)) return c;
-        const curr = clamp(c.current + delta, 0, c.expected);
-        return { ...c, current: curr };
-      })
-    );
-  };
-
-  const addAlert = (studentName: string, location: string) => {
-    const id = uid();
-    const item: AlertItem = {
-      id,
-      studentName,
-      location,
-      timestamp: now(),
-      messageSent: false,
-    };
-    setAlerts((prev) => [item, ...prev].slice(0, 50));
-    // Simulate message sending
-    setTimeout(() => {
-      setAlerts((prev) => prev.map((a) => (a.id === id ? { ...a, messageSent: true } : a)));
-    }, 800);
-  };
-
-  const addExemption = (name: string, reason: string) => {
-    if (!name.trim() || !reason.trim()) return;
-    setExemptions((prev) => [{ id: uid(), name: name.trim(), reason: reason.trim() }, ...prev]);
-    setNewExName('');
-    setNewExReason('');
-  };
-
-  const removeExemption = (id: string) => {
-    setExemptions((prev) => prev.filter((e) => e.id !== id));
-  };
-
-  const simulateDetection = () => {
-    const name = sampleStudents[Math.floor(Math.random() * sampleStudents.length)];
-    const box = randomBox();
-
-    // Choose scenario: 45% Bunking, 35% Authorized, 20% In Class
-    const r = Math.random();
-    let status: DetectionStatus;
-    let location = '';
-
-    if (r < 0.45) {
-      // Bunking (outside), only if not exempted
-      status = 'Bunking';
-      location = sampleLocations[Math.floor(Math.random() * sampleLocations.length)];
-      const isExempt = exemptions.some((e) => e.name.toLowerCase() === name.toLowerCase());
-      if (isExempt) {
-        // If exempt, treat as Authorized instead
-        status = 'Authorized';
-      } else {
-        addAlert(name, location);
-        adjustAttendance(-1);
-      }
-    } else if (r < 0.80) {
-      // Authorized (whitelisted) outside
-      status = 'Authorized';
-      location = sampleLocations[Math.floor(Math.random() * sampleLocations.length)];
-      const isExempt = exemptions.some((e) => e.name.toLowerCase() === name.toLowerCase());
-      if (!isExempt) {
-        const reason = sampleReasons[Math.floor(Math.random() * sampleReasons.length)];
-        setExemptions((prev) => [{ id: uid(), name, reason }, ...prev]);
-      }
-      // No attendance impact
-    } else {
-      // In Class detection
-      status = 'In Class';
-      location = inClassLocations[Math.floor(Math.random() * inClassLocations.length)];
-      adjustAttendance(+1);
-    }
-
-    const detection: Detection = {
-      id: uid(),
-      name,
-      status,
-      x: box.x,
-      y: box.y,
-      w: box.w,
-      h: box.h,
-      location,
-    };
-    setDetections((prev) => [detection, ...prev].slice(0, 6));
-  };
-
-  const clearAll = () => {
-    setDetections([]);
-    setAlerts([]);
-  };
-
-  return (
-    <div className="min-h-screen bg-neutral-950 text-gray-100">
-      <header className="border-b border-neutral-800/80 bg-neutral-900/60 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <ShieldCheck className="h-6 w-6 text-emerald-400" />
-            <h1 className="text-lg sm:text-xl font-semibold tracking-wide">Smart Campus Attendance & Bunking Tracker</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={simulateDetection}
-              className="inline-flex items-center gap-2 rounded-md bg-emerald-600 hover:bg-emerald-500 transition text-white px-3 py-2 text-sm"
-            >
-              <Plus className="h-4 w-4" /> Simulate Detection
-            </button>
-            <button
-              onClick={clearAll}
-              className="inline-flex items-center gap-2 rounded-md bg-neutral-800 hover:bg-neutral-700 transition text-gray-200 px-3 py-2 text-sm"
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-6 py-6 grid grid-cols-12 gap-6">
-        {/* Left: Monitoring + Analytics + Exemptions */}
-        <section className="col-span-12 lg:col-span-8 space-y-6">
-          {/* Live Monitoring View */}
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 overflow-hidden">
-            <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-neutral-800/80 bg-neutral-900">
-              <div className="flex items-center gap-2">
-                <Video className="h-5 w-5 text-sky-400" />
-                <h2 className="text-sm font-medium text-gray-200">Live Monitoring View</h2>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-blue-500/40 bg-blue-500/10 text-blue-300">
-                  <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" /> In Class
-                </span>
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-green-500/40 bg-green-500/10 text-green-300">
-                  <span className="h-2 w-2 rounded-full bg-green-400" /> Authorized
-                </span>
-                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-red-500/40 bg-red-500/10 text-red-300">
-                  <span className="h-2 w-2 rounded-full bg-red-400" /> Bunking
-                </span>
-              </div>
-            </div>
-            <div className="relative aspect-video bg-neutral-950">
-              {/* Placeholder feed */}
-              <div className="absolute inset-0 grid place-items-center">
-                <div className="text-center">
-                  <div className="text-neutral-500 text-xs mb-2">CCTV Stream Placeholder</div>
-                  <div className="text-neutral-400 text-sm">Live Feed Unavailable in Demo</div>
-                </div>
-              </div>
-              {/* Overlay detections */}
-              {detections.map((d) => {
-                const styles = statusStyles(d.status);
-                return (
-                  <div
-                    key={d.id}
-                    className={`absolute ${styles.border} ${styles.bg} rounded-md`}
-                    style={{
-                      left: `${d.x}%`,
-                      top: `${d.y}%`,
-                      width: `${d.w}%`,
-                      height: `${d.h}%`,
-                      boxShadow: '0 0 0 1px rgba(255,255,255,0.04) inset',
-                    }}
-                  >
-                    <div className={`absolute -top-6 left-0 text-[10px] sm:text-xs ${styles.text} bg-neutral-900/80 backdrop-blur px-1.5 py-0.5 rounded-md border border-neutral-800/80`}> 
-                      {d.status === 'Bunking' ? `Alert: ${d.name} - Bunking` : d.status === 'Authorized' ? `Authorized: ${d.name}` : `Student: ${d.name} - In Class`} 
-                    </div>
-                    <div className="absolute -top-6 right-0 text-[10px] sm:text-xs text-neutral-400 bg-neutral-900/70 backdrop-blur px-1.5 py-0.5 rounded-md border border-neutral-800/80">
-                      {d.location}
-                    </div>
-                    <div className="w-full h-full rounded-md border-dashed border-2 border-current opacity-50" />
-                  </div>
-                );
-              })}
-            </div>
-            <div className="px-4 sm:px-5 py-3 flex items-center justify-between border-t border-neutral-800/80 bg-neutral-900/60">
-              <div className="text-xs text-neutral-400">Overlay simulates bounding boxes and labels for detected students.</div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={simulateDetection}
-                  className="inline-flex items-center gap-2 rounded-md bg-emerald-600 hover:bg-emerald-500 transition text-white px-3 py-2 text-xs"
-                >
-                  <Plus className="h-4 w-4" /> Simulate Detection
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Attendance Analytics */}
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50">
-            <div className="px-4 sm:px-5 py-3 border-b border-neutral-800/80 bg-neutral-900 flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-emerald-400" />
-              <h3 className="text-sm font-medium">Attendance Analytics</h3>
-            </div>
-            <div className="px-4 sm:px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {classes.map((c) => {
-                const pct = Math.round((c.current / c.expected) * 100);
-                const bar = pct >= 90 ? 'bg-emerald-500' : pct >= 75 ? 'bg-amber-500' : 'bg-red-500';
-                return (
-                  <div key={c.name} className="rounded-lg border border-neutral-800 bg-neutral-950 p-4">
-                    <div className="flex items-center justify-between text-sm mb-2">
-                      <div className="font-medium text-gray-200">{c.name}</div>
-                      <div className="text-neutral-400">{c.current}/{c.expected}</div>
-                    </div>
-                    <div className="h-2 w-full rounded bg-neutral-800 overflow-hidden">
-                      <div className={`h-2 ${bar}`} style={{ width: `${pct}%` }} />
-                    </div>
-                    <div className="mt-2 text-xs text-neutral-400">Current attendance: {pct}%</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Exemption List Manager */}
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50">
-            <div className="px-4 sm:px-5 py-3 border-b border-neutral-800/80 bg-neutral-900 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <User className="h-5 w-5 text-purple-400" />
-                <h3 className="text-sm font-medium">Exemption List Manager</h3>
-              </div>
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-neutral-500" />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search students or reason..."
-                  className="pl-8 pr-3 py-2 text-sm rounded-md bg-neutral-950 border border-neutral-800 text-gray-200 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
-                />
-              </div>
-            </div>
-            <div className="px-4 sm:px-5 py-4 grid gap-4">
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                <input
-                  value={newExName}
-                  onChange={(e) => setNewExName(e.target.value)}
-                  placeholder="Student name"
-                  className="sm:col-span-5 px-3 py-2 text-sm rounded-md bg-neutral-950 border border-neutral-800 text-gray-200 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
-                />
-                <input
-                  value={newExReason}
-                  onChange={(e) => setNewExReason(e.target.value)}
-                  placeholder="Reason (e.g., Medical)"
-                  className="sm:col-span-5 px-3 py-2 text-sm rounded-md bg-neutral-950 border border-neutral-800 text-gray-200 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-purple-500/40"
-                />
-                <button
-                  onClick={() => addExemption(newExName, newExReason)}
-                  className="sm:col-span-2 inline-flex items-center justify-center gap-2 rounded-md bg-purple-600 hover:bg-purple-500 transition text-white px-3 py-2 text-sm"
-                >
-                  <Plus className="h-4 w-4" /> Add
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-2 text-xs">
-                {sampleReasons.map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => setNewExReason(r)}
-                    className="px-2 py-1 rounded-md border border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-              <div className="max-h-56 overflow-auto rounded-lg border border-neutral-800">
-                <table className="w-full text-sm">
-                  <thead className="bg-neutral-900/80 text-neutral-400">
-                    <tr>
-                      <th className="text-left font-medium px-3 py-2">Name</th>
-                      <th className="text-left font-medium px-3 py-2">Reason</th>
-                      <th className="text-right font-medium px-3 py-2">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredExemptions.length === 0 && (
-                      <tr>
-                        <td colSpan={3} className="px-3 py-6 text-center text-neutral-500">
-                          No exemptions found.
-                        </td>
-                      </tr>
-                    )}
-                    {filteredExemptions.map((e) => (
-                      <tr key={e.id} className="border-t border-neutral-800/60">
-                        <td className="px-3 py-2 text-gray-200">{e.name}</td>
-                        <td className="px-3 py-2">
-                          <span className="inline-flex items-center px-2 py-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs">
-                            {e.reason}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <button
-                            onClick={() => removeExemption(e.id)}
-                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-neutral-800 hover:bg-neutral-700 text-gray-200 text-xs"
-                          >
-                            <Trash2 className="h-4 w-4" /> Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Right: Real-Time Alert Feed */}
-        <aside className="col-span-12 lg:col-span-4 space-y-6">
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 h-full">
-            <div className="px-4 sm:px-5 py-3 border-b border-neutral-800/80 bg-neutral-900 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Bell className="h-5 w-5 text-amber-400" />
-                <h3 className="text-sm font-medium">Real-Time Alert Feed</h3>
-              </div>
-              <span className="text-xs text-neutral-400">{alerts.length} alerts</span>
-            </div>
-            <div className="p-4 sm:p-5 space-y-3 max-h-[70vh] overflow-auto">
-              {alerts.length === 0 && (
-                <div className="text-center py-10 text-neutral-500">
-                  No bunking alerts yet. Simulate a detection to see alerts.
-                </div>
-              )}
-              {alerts.map((a) => (
-                <div
-                  key={a.id}
-                  className="rounded-lg border border-neutral-800 bg-neutral-950 p-4 hover:bg-neutral-900/60 transition"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="h-5 w-5 text-red-400" />
-                      <div>
-                        <div className="font-medium text-sm text-gray-200">{a.studentName}</div>
-                        <div className="flex items-center gap-2 text-xs text-neutral-400 mt-0.5">
-                          <span className="inline-flex items-center gap-1">
-                            <MapPin className="h-3.5 w-3.5" /> {a.location}
-                          </span>
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="h-3.5 w-3.5" /> {a.timestamp}
-                          </span>
+            return (
+                <div className="min-h-screen bg-neutral-950 text-gray-100 flex flex-col">
+                    <header className="border-b border-neutral-800/80 bg-neutral-900/60 backdrop-blur sticky top-0 z-50">
+                        <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
+                                    <Icon name="ShieldCheck" className="h-6 w-6 text-emerald-400" />
+                                </div>
+                                <div className="hidden sm:block">
+                                    <h1 className="text-xl font-bold tracking-tight text-white">Smart Campus</h1>
+                                    <p className="text-[10px] text-emerald-400 font-semibold uppercase tracking-widest leading-none mt-1">Attendance & Bunking Tracker</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => setIsWebcamActive(!isWebcamActive)}
+                                    className={`inline-flex items-center gap-2 rounded-lg transition px-4 py-2 text-sm font-medium ${isWebcamActive ? 'bg-red-600 hover:bg-red-500' : 'bg-neutral-800 hover:bg-neutral-700'}`}
+                                >
+                                    <Icon name="Camera" className="h-4 w-4" /> <span>{isWebcamActive ? 'Stop' : 'Start'} Webcam</span>
+                                </button>
+                                <button onClick={simulateDetection} className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 transition px-4 py-2 text-sm font-medium shadow-lg shadow-emerald-900/40">
+                                    <Icon name="Plus" className="h-4 w-4" /> Simulation
+                                </button>
+                            </div>
                         </div>
-                      </div>
-                    </div>
-                    <div>
-                      {a.messageSent ? (
-                        <span className="inline-flex items-center gap-1.5 text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2 py-1 rounded-md text-xs">
-                          <CheckCircle className="h-4 w-4" /> Message Sent
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-md text-xs">
-                          <Loader2 className="h-4 w-4 animate-spin" /> Sending...
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </aside>
-      </main>
+                    </header>
 
-      <footer className="mx-auto max-w-7xl px-6 pb-8 text-xs text-neutral-500">
-        Demo-only mock logic. Use the Simulate Detection button to trigger various scenarios.
-      </footer>
-    </div>
-  );
-}
+                    <main className="flex-1 mx-auto max-w-7xl w-full px-6 py-8 grid grid-cols-12 gap-8">
+                        <section className="col-span-12 lg:col-span-8 space-y-8">
+                            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 overflow-hidden shadow-2xl">
+                                <div className="flex items-center justify-between px-6 py-4 bg-neutral-900/80 border-b border-neutral-800">
+                                    <h2 className="text-sm font-bold flex items-center gap-2 tracking-wide uppercase">
+                                        <Icon name="Video" className="h-4 w-4 text-sky-400" /> Live surveillance feed
+                                    </h2>
+                                    <div className="flex gap-4 items-center">
+                                        <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span><span className="text-[10px] uppercase font-bold text-blue-400">Class</span></div>
+                                        <div className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500"></span><span className="text-[10px] uppercase font-bold text-red-400">Bunk</span></div>
+                                    </div>
+                                </div>
+                                <div className="relative aspect-video bg-black group overflow-hidden">
+                                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0)_0%,rgba(0,0,0,0.8)_100%)] z-10 pointer-events-none"></div>
+                                    {isWebcamActive ? (
+                                        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover scale-x-[-1] opacity-70 grayscale contrast-125" />
+                                    ) : (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center opacity-30 select-none">
+                                            <Icon name="WifiOff" className="h-16 w-16 mb-4 text-neutral-600" />
+                                            <p className="text-xs font-bold tracking-[0.2em] uppercase">Signal Encrypted / Standby</p>
+                                        </div>
+                                    )}
+                                    {detections.map(d => {
+                                        const styles = statusStyles(d.status);
+                                        return (
+                                            <div key={d.id} className={`absolute ${styles.border} ${styles.bg} rounded-xl border-2 transition-all duration-500 z-20`} style={{left: `${d.x}%`, top: `${d.y}%`, width: `${d.w}%`, height: `${d.h}%`}}>
+                                                <div className={`absolute -top-10 left-0 ${styles.text} bg-neutral-900/90 backdrop-blur px-3 py-1.5 rounded-lg border border-neutral-700 shadow-2xl whitespace-nowrap`}>
+                                                    <p className="text-xs font-bold">{d.name}</p>
+                                                    <p className="text-[10px] opacity-70 font-medium">{d.status} • {d.location}</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    <div className="absolute inset-0 pointer-events-none opacity-20 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] blend-overlay"></div>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/40">
+                                    <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 mb-6 flex items-center gap-2">
+                                        <Icon name="Activity" className="h-4 w-4 text-emerald-400" /> Attendance logs
+                                    </h3>
+                                    <div className="space-y-4">
+                                        {classes.map(c => (
+                                            <div key={c.name} className="space-y-1.5">
+                                                <div className="flex justify-between text-xs font-bold">
+                                                    <span className="text-neutral-500">{c.name}</span>
+                                                    <span>{c.current}/{c.expected}</span>
+                                                </div>
+                                                <div className="h-1.5 w-full bg-neutral-800 rounded-full overflow-hidden">
+                                                    <div className="h-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.4)]" style={{width: `${(c.current/c.expected)*100}%`}}></div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="p-6 rounded-2xl border border-neutral-800 bg-neutral-900/40">
+                                    <h3 className="text-sm font-bold uppercase tracking-widest text-neutral-400 mb-6 flex items-center gap-2">
+                                        <Icon name="UserPlus" className="h-4 w-4 text-purple-400" /> Fast exemption
+                                    </h3>
+                                    <div className="space-y-3">
+                                        <input value={newExName} onChange={e => setNewExName(e.target.value)} placeholder="Student Name" className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 text-xs focus:ring-1 focus:ring-purple-500 transition outline-none"/>
+                                        <select value={newExReason} onChange={e => setNewExReason(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 text-xs outline-none focus:ring-1 focus:ring-purple-500 transition appearance-none">
+                                            <option value="">Choose Reason</option>
+                                            {sampleReasons.map(r => <option key={r} value={r}>{r}</option>)}
+                                        </select>
+                                        <button onClick={() => { if(newExName && newExReason) { setExemptions([{id: uid(), name: newExName, reason: newExReason}, ...exemptions]); setNewExName(''); setNewExReason(''); } }} className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-bold transition shadow-lg shadow-purple-900/20">Add Authority</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <aside className="col-span-12 lg:col-span-4 h-fit">
+                            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 overflow-hidden shadow-xl">
+                                <div className="px-6 py-4 border-b border-neutral-800 bg-neutral-900/80 flex justify-between items-center">
+                                    <h3 className="text-xs font-bold tracking-widest uppercase flex items-center gap-2">
+                                        <Icon name="Bell" className="h-4 w-4 text-amber-500" /> Incident List
+                                    </h3>
+                                    <span className="text-[10px] font-bold bg-neutral-800 px-2 py-0.5 rounded text-neutral-500 tracking-tighter">{alerts.length} ITEMS</span>
+                                </div>
+                                <div className="p-6 space-y-4 max-h-[600px] overflow-y-auto custom-scrollbar">
+                                    {alerts.map(a => (
+                                        <div key={a.id} className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 group transition-all hover:border-red-500/50">
+                                            <div className="flex justify-between items-start mb-2">
+                                                <h4 className="text-xs font-bold text-gray-200 uppercase tracking-wide">{a.studentName}</h4>
+                                                <Icon name="AlertTriangle" className="h-3.5 w-3.5 text-red-500 animate-pulse" />
+                                            </div>
+                                            <div className="flex gap-4 text-[10px] text-neutral-500 font-medium mb-3">
+                                                <span className="flex items-center gap-1"><Icon name="MapPin" className="h-3 w-3" /> {a.location}</span>
+                                                <span className="flex items-center gap-1"><Icon name="Clock" className="h-3 w-3" /> {a.timestamp}</span>
+                                            </div>
+                                            <div className={`mt-2 pt-2 border-t border-neutral-900 flex items-center gap-2 text-[9px] font-bold uppercase tracking-wider ${a.messageSent ? 'text-emerald-500' : 'text-amber-500'}`}>
+                                                {a.messageSent ? <Icon name="CheckCircle" className="h-3.5 w-3.5" /> : <Icon name="Loader2" className="h-3.5 w-3.5 animate-spin" />}
+                                                <span>{a.messageSent ? 'Advisor Notified' : 'Dispatching SMS...'}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {alerts.length === 0 && (
+                                        <div className="py-12 text-center opacity-20 font-bold uppercase tracking-widest text-xs">No active violations</div>
+                                    )}
+                                </div>
+                            </div>
+                        </aside>
+                    </main>
+
+                    <footer className="p-8 mt-auto border-t border-neutral-900">
+                        <div className="mx-auto max-w-7xl flex justify-between items-center opacity-30 text-[10px] uppercase font-bold tracking-[0.2em]">
+                            <span>System v2.5.0-Deployment</span>
+                            <span>Secure Channel 01 Active</span>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
